@@ -237,9 +237,15 @@ void UHF::form_initialF() {
 void UHF::form_F() {
     Fa_->copy(H_);
     Fa_->add(Ga_);
+    for (const auto& Vext : external_potentials_) {
+        Fa_->add(Vext);
+    }
 
     Fb_->copy(H_);
     Fb_->add(Gb_);
+    for (const auto& Vext : external_potentials_) {
+        Fb_->add(Vext);
+    }
 
     if (debug_) {
         Fa_->print("outfile");

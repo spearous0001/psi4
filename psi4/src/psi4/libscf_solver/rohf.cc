@@ -364,9 +364,16 @@ void ROHF::form_initialF() {
 void ROHF::form_F() {
     // Start by constructing the standard Fa and Fb matrices encountered in UHF
     Fa_->copy(H_);
-    Fb_->copy(H_);
     Fa_->add(Ga_);
+    for (const auto& Vext : external_potentials_) {
+        Fa_->add(Vext);
+    }
+
+    Fb_->copy(H_);
     Fb_->add(Gb_);
+    for (const auto& Vext : external_potentials_) {
+        Fb_->add(Vext);
+    }
 
     moFa_->transform(Fa_, Ca_);
     moFb_->transform(Fb_, Ca_);
@@ -494,8 +501,8 @@ void ROHF::form_D() {
 double ROHF::compute_initial_E() { return 0.5 * (compute_E() + nuclearrep_); }
 
 double ROHF::compute_E() {
-    double one_electron_E = Da_->vector_dot(H_) + Db_->vector_dot(H_);
-    double two_electron_E = 0.5 * (Da_->vector_dot(Fa_) + Db_->vector_dot(Fb_) - one_electron_E);
+    double one_electron_E = Dt_->vector_dot(H_);
+    double two_electron_E = 0.5 * (Da_->vector_dot(Ga_) + Db_->vector_dot(Gb_));
 
     energies_["Nuclear"] = nuclearrep_;
     energies_["One-Electron"] = one_electron_E;
@@ -504,11 +511,7 @@ double ROHF::compute_E() {
     energies_["VV10_E"] = 0.0;
     energies_["-D"] = 0.0;
 
-    double DH = Da_->vector_dot(H_);
-    DH += Db_->vector_dot(H_);
-    double DFa = Da_->vector_dot(Fa_);
-    double DFb = Db_->vector_dot(Fb_);
-    double Eelec = 0.5 * (DH + DFa + DFb);
+    double Eelec = one_electron_E + two_electron_E;
     double Etotal = nuclearrep_ + Eelec;
     return Etotal;
 }

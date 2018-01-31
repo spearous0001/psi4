@@ -11,7 +11,6 @@ from psi4 import core
 #logger = logging.getLogger("scf.scf_iterator")
 #logger.setLevel(logging.DEBUG)
 
-
 # Q: I expect more local settings of options for part of SCF.
 #    For convcrit, do we want:
 #   (A) easy to grep
@@ -137,8 +136,8 @@ def scf_iterate(self, e_conv=None, d_conv=None):
 
     if self.iteration_ < 2:
         core.print_out("  ==> Iterations <==\n\n")
-        core.print_out("%s                        Total Energy        Delta E     RMS |[F,P]|\n\n" %
-                       ("   " if df else ""))
+        core.print_out("%s                        Total Energy        Delta E     RMS |[F,P]|\n\n" % ("   "
+                                                                                                      if df else ""))
 
     # SCF iterations!
     SCFE_old = 0.0
@@ -168,6 +167,7 @@ def scf_iterate(self, e_conv=None, d_conv=None):
         # #endif
 
         SCFE = 0.0
+        self.clear_external_potentials()
 
         core.timer_on("HF: Form G")
         self.form_G()
@@ -176,6 +176,19 @@ def scf_iterate(self, e_conv=None, d_conv=None):
         # reset fractional SAD occupation
         if (self.iteration_ == 0) and self.reset_occ_:
             self.reset_occupation()
+
+        upcm = 0.0
+        if core.get_option('SCF', 'PCM'):
+            calc_type = core.PCM.CalcType.Total
+            if core.get_option("PCM", "PCM_SCF_TYPE") == "SEPARATE":
+                calc_type = core.PCM.CalcType.NucAndEle
+            Dt = self.Da().clone()
+            Dt.add(self.Db())
+            upcm, Vpcm = self.get_PCM().compute_PCM_terms(Dt, calc_type)
+            SCFE += upcm
+            self.push_back_external_potential(Vpcm)
+        self.set_variable("PCM POLARIZATION ENERGY", upcm)
+        self.set_energies("PCM Polarization", upcm)
 
         core.timer_on("HF: Form F")
         self.form_F()
@@ -195,46 +208,6 @@ def scf_iterate(self, e_conv=None, d_conv=None):
         #        }
         # #endif
 
-        # #ifdef USING_PCMSolver
-        #        # The PCM potential must be added to the Fock operator *after* the
-        #        # energy computation, not in form_F()
-        #        if(pcm_enabled_) {
-        #          # Prepare the density
-        #          SharedMatrix D_pcm(Da_->clone())
-        #          if(same_a_b_orbs()) {
-        #            D_pcm->scale(2.0) # PSI4's density doesn't include the occupation
-        #          } else {
-        #            D_pcm->add(Db_)
-        #          }
-        #
-        #          # Compute the PCM charges and polarization energy
-        #          double epcm = 0.0
-        #          if (options_.get_str("PCM_SCF_TYPE") == "TOTAL") {
-        #            epcm = hf_pcm_->compute_E(D_pcm, PCM::Total)
-        #          } else {
-        #            epcm = hf_pcm_->compute_E(D_pcm, PCM::NucAndEle)
-        #          }
-        #          energies_["PCM Polarization"] = epcm
-        #          variables_["PCM POLARIZATION ENERGY"] = energies_["PCM Polarization"]
-        #          Process::environment.globals["PCM POLARIZATION ENERGY"] = energies_["PCM Polarization"]
-        #          E_ += epcm
-        #
-        #          # Add the PCM potential to the Fock matrix
-        #          SharedMatrix V_pcm
-        #          V_pcm = hf_pcm_->compute_V()
-        #          if (same_a_b_orbs()) {
-        #            Fa_->add(V_pcm)
-        #          } else {
-        #            Fa_->add(V_pcm)
-        #            Fb_->add(V_pcm)
-        #          }
-        #        } else {
-        #          energies_["PCM Polarization"] = 0.0
-        #          variables_["PCM POLARIZATION ENERGY"] = energies_["PCM Polarization"]
-        #          Process::environment.globals["PCM POLARIZATION ENERGY"] = energies_["PCM Polarization"]
-        #        }
-        # #endif
-
         self.set_energies("Total Energy", SCFE)
         Ediff = SCFE - SCFE_old
         SCFE_old = SCFE
@@ -242,8 +215,7 @@ def scf_iterate(self, e_conv=None, d_conv=None):
         status = []
 
         # We either do SOSCF or DIIS
-        if (soscf_enabled and self.iteration_ > 3 and
-                Drms < core.get_option('SCF', 'SOSCF_START_CONVERGENCE')):
+        if (soscf_enabled and (self.iteration_ > 3) and (Drms < core.get_option('SCF', 'SOSCF_START_CONVERGENCE'))):
 
             Drms = self.compute_orbital_gradient(False, core.get_option('SCF', 'DIIS_MAX_VECS'))
             diis_performed = False
@@ -253,10 +225,10 @@ def scf_iterate(self, e_conv=None, d_conv=None):
                 base_name = "SOSCF, nmicro="
 
             if not _converged(Ediff, Drms, e_conv=e_conv, d_conv=d_conv):
-                nmicro = self.soscf_update(core.get_option('SCF', 'SOSCF_CONV'),
-                                           core.get_option('SCF', 'SOSCF_MIN_ITER'),
-                                           core.get_option('SCF', 'SOSCF_MAX_ITER'),
-                                           core.get_option('SCF', 'SOSCF_PRINT'))
+                nmicro = self.soscf_update(
+                    core.get_option('SCF', 'SOSCF_CONV'),
+                    core.get_option('SCF', 'SOSCF_MIN_ITER'),
+                    core.get_option('SCF', 'SOSCF_MAX_ITER'), core.get_option('SCF', 'SOSCF_PRINT'))
                 if nmicro > 0:
                     # if zero, the soscf call bounced for some reason
                     self.find_occupation()
@@ -287,8 +259,8 @@ def scf_iterate(self, e_conv=None, d_conv=None):
 
             Drms = self.compute_orbital_gradient(add_to_diis_subspace, core.get_option('SCF', 'DIIS_MAX_VECS'))
 
-            if (self.diis_enabled_ and
-                    self.iteration_ >= self.diis_start_ + core.get_option('SCF', 'DIIS_MIN_VECS') - 1):
+            if (self.diis_enabled_
+                    and self.iteration_ >= self.diis_start_ + core.get_option('SCF', 'DIIS_MIN_VECS') - 1):
                 diis_performed = self.diis()
 
             if diis_performed:
@@ -319,8 +291,7 @@ def scf_iterate(self, e_conv=None, d_conv=None):
         core.set_variable("SCF ITERATION ENERGY", SCFE)
 
         # After we've built the new D, damp the update
-        if (damping_enabled and self.iteration_ > 1 and
-                Drms > core.get_option('SCF', 'DAMPING_CONVERGENCE')):
+        if (damping_enabled and self.iteration_ > 1 and Drms > core.get_option('SCF', 'DAMPING_CONVERGENCE')):
             damping_percentage = core.get_option('SCF', "DAMPING_PERCENTAGE")
             self.damping_update(damping_percentage * 0.01)
             status.append("DAMP={}%".format(round(damping_percentage)))
@@ -333,8 +304,7 @@ def scf_iterate(self, e_conv=None, d_conv=None):
 
         # Print out the iteration
         core.print_out("   @%s%s iter %3d: %20.14f   %12.5e   %-11.5e %s\n" %
-                       ("DF-" if df else "", reference, self.iteration_, SCFE, Ediff, Drms,
-                        '/'.join(status)))
+                       ("DF-" if df else "", reference, self.iteration_, SCFE, Ediff, Drms, '/'.join(status)))
 
         # if a an excited MOM is requested but not started, don't stop yet
         if self.MOM_excited_ and not self.MOM_performed_:
@@ -447,31 +417,19 @@ def scf_finalize_energy(self):
     core.print_out("\n\n")
     self.print_energies()
 
+    self.clear_external_potentials()
+    if core.get_option('SCF', 'PCM'):
+        calc_type = core.PCM.CalcType.Total
+        if core.get_option("PCM", "PCM_SCF_TYPE") == "SEPARATE":
+            calc_type = core.PCM.CalcType.NucAndEle
+        Dt = self.Da().clone()
+        Dt.add(self.Db())
+        _, Vpcm = self.get_PCM().compute_PCM_terms(Dt, calc_type)
+        self.push_back_external_potential(Vpcm)
+
     # recompute the Fock matrices as they are modified during the SCF
     #   iteration and might need to be dumped to checkpoint later
     self.form_F()
-
-    # ifdef USING_PCMSolver
-    #  if(pcm_enabled_) {
-    #      # Prepare the density
-    #      SharedMatrix D_pcm(Da_->clone())
-    #      if(same_a_b_orbs()) {
-    #        D_pcm->scale(2.0) # PSI4's density doesn't include the occupation
-    #      }
-    #      else {
-    #        D_pcm->add(Db_)
-    #      }
-
-    #      # Add the PCM potential to the Fock matrix
-    #      SharedMatrix V_pcm
-    #      V_pcm = hf_pcm_->compute_V()
-    #      if(same_a_b_orbs()) Fa_->add(V_pcm)
-    #      else {
-    #        Fa_->add(V_pcm)
-    #        Fb_->add(V_pcm)
-    #      }
-    #  }
-    # endif
 
     # Properties
     #  Comments so that autodoc utility will find these PSI variables
@@ -488,6 +446,10 @@ def scf_finalize_energy(self):
     # Orbitals are always saved, in case an MO guess is requested later
     # save_orbitals()
 
+    # Shove variables into global space
+    for k, v in self.variables().items():
+        core.set_variable(k, v)
+
     self.finalize()
 
     core.print_out("\nComputation Completed\n")
@@ -495,10 +457,57 @@ def scf_finalize_energy(self):
     return energy
 
 
+def scf_print_energies(self):
+    enuc = self.get_energies('Nuclear')
+    e1 = self.get_energies('One-Electron')
+    e2 = self.get_energies('Two-Electron')
+    exc = self.get_energies('XC')
+    ed = self.get_energies('-D')
+    evv10 = self.get_energies('VV10')
+    eefp = self.get_energies('EFP')
+    epcm = self.get_energies('PCM Polarization')
+
+    hf_energy = enuc + e1 + e2
+    dft_energy = hf_energy + exc + ed + evv10
+    total_energy = dft_energy + eefp + epcm
+
+    core.print_out("   => Energetics <=\n\n")
+    core.print_out("    Nuclear Repulsion Energy =        {:24.16f}\n".format(enuc))
+    core.print_out("    One-Electron Energy =             {:24.16f}\n".format(e1))
+    core.print_out("    Two-Electron Energy =             {:24.16f}\n".format(e2))
+    if self.functional().needs_xc():
+        core.print_out("    DFT Exchange-Correlation Energy = {:24.16f}\n".format(exc))
+        core.print_out("    Empirical Dispersion Energy =     {:24.16f}\n".format(ed))
+        core.print_out("    VV10 Nonlocal Energy =            {:24.16f}\n".format(evv10))
+    if core.get_option('SCF', 'PCM'):
+        core.print_out("    PCM Polarization Energy =         {:24.16f}\n".format(epcm))
+    #if (Process::environment.get_efp()->get_frag_count() > 0) {
+    #    outfile->Printf("    EFP Energy =                      %24.16f\n", energies_["EFP"]);
+    #}
+    core.print_out("    Total Energy =                    {:24.16f}\n".format(total_energy))
+
+    self.set_variable('NUCLEAR REPULSION ENERGY', enuc)
+    self.set_variable('ONE-ELECTRON ENERGY', e1)
+    self.set_variable('TWO-ELECTRON ENERGY', e2)
+    if abs(exc) > 1.0e-14:
+        self.set_variable('DFT XC ENERGY', exc)
+        self.set_variable('DFT VV10 ENERGY', evv10)
+        self.set_variable('DFT FUNCTIONAL TOTAL ENERGY', hf_energy + exc + evv10)
+        self.set_variable('DFT TOTAL ENERGY', dft_energy)
+    else:
+        self.set_variable('HF TOTAL ENERGY', hf_energy)
+    if abs(ed) > 1.0e-14:
+        self.set_variable('DISPERSION CORRECTION ENERGY', ed)
+
+    self.set_variable('SCF ITERATIONS', self.iteration_)
+    self.set_variable('SCF N ITERS', self.iteration_)
+
+
 core.HF.initialize = scf_initialize
 core.HF.iterations = scf_iterate
 core.HF.compute_energy = scf_compute_energy
 core.HF.finalize_energy = scf_finalize_energy
+core.HF.print_energies = scf_print_energies
 
 
 def _converged(e_delta, d_rms, e_conv=None, d_conv=None):
@@ -566,8 +575,8 @@ def _validate_diis():
 
         maxvecs = core.get_option('SCF', 'DIIS_MAX_VECS')
         if maxvecs < minvecs:
-            raise ValidationError('SCF DIIS_MAX_VECS ({}) must be at least DIIS_MIN_VECS ({})'.format(
-                                  maxvecs, minvecs))
+            raise ValidationError(
+                'SCF DIIS_MAX_VECS ({}) must be at least DIIS_MIN_VECS ({})'.format(maxvecs, minvecs))
 
     return enabled
 
@@ -644,8 +653,8 @@ def _validate_soscf():
 
         maxiter = core.get_option('SCF', 'SOSCF_MAX_ITER')
         if maxiter < miniter:
-            raise ValidationError('SCF SOSCF_MAX_ITER ({}) must be at least SOSCF_MIN_ITER ({})'.format(
-                                  maxiter, miniter))
+            raise ValidationError(
+                'SCF SOSCF_MAX_ITER ({}) must be at least SOSCF_MIN_ITER ({})'.format(maxiter, miniter))
 
         conv = core.get_option('SCF', 'SOSCF_CONV')
         if conv < 1.e-10:

@@ -238,6 +238,9 @@ bool RHF::diis() { return diis_manager_->extrapolate(1, Fa_.get()); }
 void RHF::form_F() {
     Fa_->copy(H_);
     Fa_->add(G_);
+    for (const auto& Vext : external_potentials_) {
+        Fa_->add(Vext);
+    }
 
     if (debug_) {
         Fa_->print();
